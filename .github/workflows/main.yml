@@ -1,0 +1,62 @@
+name: Build HATIM5G APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'HATIM5G-Hua4GMon-Arabic-Logo.zip'
+      - '.github/workflows/main.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check ZIP file
+        run: |
+          test -f HATIM5G-Hua4GMon-Arabic-Logo.zip || {
+            echo "ERROR: ZIP file not found in repository root."
+            exit 1
+          }
+
+      - name: Extract source
+        run: |
+          mkdir -p source
+          unzip -q HATIM5G-Hua4GMon-Arabic-Logo.zip -d source
+
+      - name: Locate Buildozer project
+        run: |
+          SPEC=$(find source -type f -name buildozer.spec -print -quit)
+          if [ -z "$SPEC" ]; then
+            echo "ERROR: buildozer.spec not found in ZIP."
+            echo "The ZIP may contain an extra folder or may not be the source project."
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$SPEC")" >> "$GITHUB_ENV"
+          echo "Found project: $(dirname "$SPEC")"
+
+      - name: Build APK with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          repository_root: .
+          workdir: ${{ env.PROJECT_DIR }}
+          buildozer_version: stable
+          command: buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HATIM5G-debug-apk
+          path: |
+            source/**/bin/*.apk
+            source/**/bin/*.aab
+          if-no-files-found: error
+          retention-days: 7
