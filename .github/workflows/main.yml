@@ -47,6 +47,10 @@ jobs:
             exit 1
           fi
           echo "PROJECT_DIR=$(dirname "$SPEC")" >> "$GITHUB_ENV"
+          
+
+          sed -i '/^android.accept_sdk_license[[:space:]]*=/d' "$SPEC"
+          echo 'android.accept_sdk_license = True' >> "$SPEC"
 
       - name: Install Buildozer
         run: |
