@@ -6,7 +6,7 @@ on:
       source_zip:
         description: 'اسم ملف ZIP الموجود في جذر المستودع'
         required: true
-        default: 'HATIM5G-Arabic-Fix.zip'
+        default: 'HATIM5G-Arabic-Fix-1.zip'
         type: string
 
 permissions:
