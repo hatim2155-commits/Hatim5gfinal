@@ -7,7 +7,7 @@ on:
       source_zip:
         description: "ZIP file uploaded to repository root"
         required: true
-        default: "HATIM5G-GitHub-APK-Build.zip"
+        default: "HATIM5G-Arabic-Fix.zip"
         type: string
 
 permissions:
