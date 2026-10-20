@@ -1,0 +1,159 @@
+name: Build HATIM5G APK from ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_zip:
+        description: 'اسم ملف ZIP الموجود في جذر المستودع'
+        required: true
+        default: 'HATIM5G-Updated-Full-Project.zip'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract and prepare Android source
+        shell: bash
+        env:
+          ZIP_FILE: ${{ inputs.source_zip }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "::error::ZIP not found: $ZIP_FILE"
+            echo "Files in repository root:"
+            ls -lah
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -oq "$ZIP_FILE" -d extracted
+
+          SPEC_FILE="$(find extracted -type f -name buildozer.spec -print -quit)"
+          if [ -z "$SPEC_FILE" ]; then
+            echo "::error::No buildozer.spec found inside $ZIP_FILE"
+            find extracted -maxdepth 5 -type f | head -150
+            exit 1
+          fi
+          SRC_DIR="$(dirname "$SPEC_FILE")"
+          for item in android_main.py core assets LICENSE buildozer.spec; do
+            if [ ! -e "$SRC_DIR/$item" ]; then
+              echo "::error::Required source item missing: $item"
+              exit 1
+            fi
+          done
+
+          rm -rf build-android
+          mkdir -p build-android/LICENSES
+          cp "$SRC_DIR/android_main.py" build-android/main.py
+          cp -r "$SRC_DIR/core" "$SRC_DIR/assets" build-android/
+          cp "$SRC_DIR/buildozer.spec" build-android/
+          # Ensure Buildozer accepts Android SDK licenses in the [app] section.
+          python - <<'PYCONF'
+          from pathlib import Path
+          p = Path("build-android/buildozer.spec")
+          text = p.read_text()
+          lines = text.splitlines()
+          section = None
+          inserted = False
+          out = []
+          for line in lines:
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                  if section == "app" and not inserted:
+                      out.append("android.accept_sdk_license = True")
+                      inserted = True
+                  section = stripped[1:-1].strip().lower()
+              if section == "app" and stripped.startswith("android.accept_sdk_license"):
+                  if not inserted:
+                      out.append("android.accept_sdk_license = True")
+                      inserted = True
+                  continue
+              out.append(line)
+          if section == "app" and not inserted:
+              out.append("android.accept_sdk_license = True")
+              inserted = True
+          if not inserted:
+              raise SystemExit("Could not find [app] section in buildozer.spec")
+          p.write_text("\n".join(out) + "\n")
+          print("Enabled android.accept_sdk_license in [app]")
+          PYCONF
+          cp "$SRC_DIR/LICENSE" build-android/LICENSES/Hua4GMon-LICENSE.txt
+          if [ -d "$SRC_DIR/LICENSES" ]; then
+            find "$SRC_DIR/LICENSES" -maxdepth 1 -type f -name '*.txt' -exec cp {} build-android/LICENSES/ \;
+          fi
+          echo "Prepared Android project from: $SRC_DIR"
+          test -f build-android/main.py
+          test -f build-android/buildozer.spec
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
+            cmake libffi-dev libssl-dev build-essential ccache
+
+      - name: Install Buildozer
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install 'buildozer==1.5.0' 'cython==0.29.36'
+
+      - name: Cache Android SDK and NDK
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-hatim5g-arabic-fix-v2-${{ hashFiles('**/buildozer.spec') }}
+          restore-keys: |
+            buildozer-hatim5g-arabic-fix-v2-
+            buildozer-hatim5g-v1-
+
+      - name: Build debug APK
+        working-directory: build-android
+        shell: bash
+        env:
+          APP_ANDROID_ACCEPT_SDK_LICENSE: '1'
+        run: |
+          buildozer -v android debug
+
+      - name: Verify and stage APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find build-android/bin -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          if [ -z "$APK" ]; then
+            echo '::error::Build finished but no APK was found in build-android/bin'
+            find build-android -maxdepth 4 -type f | tail -100
+            exit 1
+          fi
+          cp "$APK" HATIM5G-debug.apk
+          sha256sum HATIM5G-debug.apk > HATIM5G-debug.apk.sha256
+          ls -lh HATIM5G-debug.apk HATIM5G-debug.apk.sha256
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HATIM5G-debug-apk
+          path: |
+            HATIM5G-debug.apk
+            HATIM5G-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
